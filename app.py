@@ -9,8 +9,7 @@ from langchain.chains.question_answering import load_qa_chain
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-
-def process_pdf_files(pdf_files, embedding_model_name):
+def process_pdf_files(pdf_files, embedding_model_name, api_key):
     text = ""
     for pdf in pdf_files:
         reader = PdfReader(pdf)
@@ -18,27 +17,27 @@ def process_pdf_files(pdf_files, embedding_model_name):
             text += page.extract_text()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=500)
     text_chunks = text_splitter.split_text(text)
-    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model_name)
+    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model_name, google_api_key=api_key)
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("pdf_database")
     return vector_store
 
-def setup_qa_chain(chat_model_name):
+def setup_qa_chain(chat_model_name, api_key):
     prompt_template = """
     Give answer to the asked question using the provided custom knowledge or given context only and if there is no related content then simply say "Your document dont contain related context to answer". Make sure to not answer incorrect.\n\n
     Context:\n{context}\n
     Question:\n{question}\n
     Answer:
     """
-    model = ChatGoogleGenerativeAI(model=chat_model_name, temperature=0.3)
+    model = ChatGoogleGenerativeAI(model=chat_model_name, temperature=0.3, google_api_key=api_key)
     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
     return load_qa_chain(model, chain_type="stuff", prompt=prompt)
 
-def get_response(user_question, chat_model_name, embedding_model_name):
-    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model_name)
+def get_response(user_question, chat_model_name, embedding_model_name, api_key):
+    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model_name, google_api_key=api_key)
     vector_store = FAISS.load_local("pdf_database", embeddings, allow_dangerous_deserialization=True)
     docs = vector_store.similarity_search(user_question)
-    chain = setup_qa_chain(chat_model_name)
+    chain = setup_qa_chain(chat_model_name, api_key)
     response = chain(
         {"input_documents": docs, "question": user_question},
         return_only_outputs=True
@@ -64,10 +63,6 @@ def main():
 
     st.subheader("Upload your PDF Files")
     pdf_files = st.file_uploader("Upload your files", accept_multiple_files=True)
-    if st.button("Submit data") and pdf_files:
-        with st.spinner("Processing the data . . ."):
-            process_pdf_files(pdf_files, embedding_model_name)
-            st.success("Files submitted successfully")
 
     st.sidebar.header("Configuration")
     api_key = st.sidebar.text_input("Google API Key:", type="password")
@@ -90,6 +85,14 @@ def main():
     else:
         embedding_model_name = selected_embedding_model
 
+    if st.button("Submit data") and pdf_files:
+        if embedding_model_name:
+            with st.spinner("Processing the data . . ."):
+                process_pdf_files(pdf_files, embedding_model_name, api_key)
+                st.success("Files submitted successfully")
+        else:
+            st.warning("Please select or enter an embedding model.")
+
     if api_key:
         genai.configure(api_key=api_key)
         
@@ -97,7 +100,7 @@ def main():
 
         if user_question:
             with st.spinner("Generating response..."):
-                response = get_response(user_question, chat_model_name, embedding_model_name)
+                response = get_response(user_question, chat_model_name, embedding_model_name, api_key)
                 st.write("**Reply:** ", response)
 
     else:
